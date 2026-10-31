@@ -1,0 +1,45 @@
+{
+  "name": "boardly",
+  "productName": "Boardly",
+  "version": "1.0.0",
+  "description": "A local-first visual board app. Notes, images, to-dos, links and sketches on an endless canvas, exportable to Word, PowerPoint and PDF.",
+  "author": "efter-dash",
+  "license": "MIT",
+  "homepage": "https://github.com/efter-dash/boardly",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "io.github.efterdash.boardly",
+    "productName": "Boardly",
+    "copyright": "MIT License",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["app/**/*", "electron/main.js", "package.json"],
+    "afterPack": "electron/adhoc-sign.js",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }],
+      "artifactName": "Boardly-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": { "title": "Boardly ${version}" },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Boardly-${version}-windows-setup.${ext}"
+    },
+    "portable": { "artifactName": "Boardly-${version}-windows-portable.${ext}" }
+  }
+}

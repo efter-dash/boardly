@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boardly</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="topbar">
+  <button id="homeBtn" class="logo" title="Home"><span class="logo-mark"></span>Boardly</button>
+  <nav id="crumbs"></nav>
+  <span id="saveStatus" class="status">Saved locally</span>
+  <div class="spacer"></div>
+  <button id="searchBtn" class="tb" title="Search all boards (Ctrl/⌘ K)"></button>
+  <button id="undoBtn" class="tb" title="Undo (Ctrl/⌘ Z)"></button>
+  <button id="redoBtn" class="tb" title="Redo (Ctrl/⌘ Shift Z)"></button>
+  <div class="zoom">
+    <button id="zoomOut" class="tb" title="Zoom out">−</button>
+    <button id="zoomLabel" class="tb zoom-label" title="Reset to 100%">100%</button>
+    <button id="zoomIn" class="tb" title="Zoom in">+</button>
+    <button id="zoomFit" class="tb" title="Zoom to fit (Ctrl/⌘ 1)"></button>
+  </div>
+  <button id="exportBtn" class="primary">Export</button>
+  <button id="menuBtn" class="tb" title="More"></button>
+</header>
+<aside id="toolbar"></aside>
+<main id="viewport">
+  <div id="world" class="world"><svg id="conns" class="conns"></svg></div>
+  <div id="marquee"></div>
+  <div id="emptyHint" class="empty-hint">
+    <strong>This board is empty</strong>
+    Drag a card from the left, double-click anywhere to write a note,<br>or drop images and files straight onto the board.
+  </div>
+</main>
+<div id="layer"></div>
+<script src="app.js"></script>
+<script src="export.js"></script>
+</body>
+</html>
