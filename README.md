@@ -27,6 +27,8 @@ A free, local-first visual board app for notes, images, to-dos, links and sketch
 | PDF | A picture of the board plus a text outline |
 | PNG, Markdown, .json | Image, plain text, or a Boardly file you can import again |
 
+**Export only some cards:** select the cards you want (Shift-click, or drag a box around them), right-click, and choose **Export selected cards…**. You get the same formats, with only those cards, so the files stay small.
+
 ## Where your data lives
 
 Boards are saved in local storage on your device (IndexedDB). The browser version and the desktop app each keep their own separate data. Use **⋯ → Back up all boards** to save a `.json` file, and **⋯ → Import backup** to restore it or move to another computer.

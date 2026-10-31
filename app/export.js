@@ -151,8 +151,29 @@ async function loadImg(src) {
   await img.decode();
   return img;
 }
-/* Rasterises an image or sketch card to a size-capped PNG/JPEG suitable for embedding. */
-async function imageData(it, max = 1600) {
+/* Rasterises an image or sketch card to a size-capped image for embedding. Opaque images become
+   JPEG (PNG only when transparency is needed) so boards with hundreds of photos stay a sensible size.
+   Results are cached per export so an image used on several slides or pages is only encoded once. */
+const IMG_MAX = 1400;
+let imageCache = new Map(), imageProgress = null;
+function startImageExport(label) {
+  imageCache = new Map();
+  imageProgress = { label, done: 0, el: toast(label + '…', 0) };
+}
+function endImageExport() {
+  imageProgress?.el.remove();
+  imageProgress = null;
+  imageCache = new Map();
+}
+function imageData(it, max = IMG_MAX) {
+  const key = `${it.type === 'sketch' ? it.id + ':' + (it.png || '').length : it.blob}|${max}`;
+  if (!imageCache.has(key)) imageCache.set(key, encodeImage(it, max).then(d => {
+    if (imageProgress) imageProgress.el.textContent = `${imageProgress.label}… ${++imageProgress.done} image${imageProgress.done === 1 ? '' : 's'} prepared`;
+    return d;
+  }));
+  return imageCache.get(key);
+}
+async function encodeImage(it, max) {
   const src = it.type === 'sketch' ? it.png : await blobUrl(it.blob);
   if (!src) return null;
   try {
@@ -161,20 +182,25 @@ async function imageData(it, max = 1600) {
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.round(img.naturalWidth * s));
     c.height = Math.max(1, Math.round(img.naturalHeight * s));
-    const ctx = c.getContext('2d');
-    const jpeg = it.type === 'image' && !/png|gif|svg|webp/i.test(it.mime || '') && !(await isTransparentType(it));
-    if (jpeg) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); }
+    const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(img, 0, 0, c.width, c.height);
-    const fmt = jpeg ? 'JPEG' : 'PNG';
-    const dataURL = c.toDataURL(jpeg ? 'image/jpeg' : 'image/png', 0.9);
-    return { dataURL, w: c.width, h: c.height, fmt, bytes: dataURLToBytes(dataURL) };
+    const png = hasTransparency(ctx, c.width, c.height);
+    if (!png) {
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
+    const dataURL = c.toDataURL(png ? 'image/png' : 'image/jpeg', 0.82);
+    return { dataURL, w: c.width, h: c.height, fmt: png ? 'PNG' : 'JPEG', bytes: dataURLToBytes(dataURL) };
   } catch {
     return null;
   }
 }
-async function isTransparentType(it) {
-  const r = await DB.get('blobs', it.blob);
-  return /png|gif|svg|webp/i.test(r?.type || '');
+function hasTransparency(ctx, w, h) {
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const step = Math.max(4, Math.floor(d.length / 4 / 40000) * 4);
+  for (let i = 3; i < d.length; i += step) if (d[i] < 250) return true;
+  return false;
 }
 function dataURLToBytes(u) {
   const bin = atob(u.split(',')[1]);
@@ -301,11 +327,12 @@ async function exportPPTX(board) {
 
   // Overview slide: the board's real layout, as editable shapes
   const tops = topItems(board);
-  if (tops.length && board === S.board) {
+  if (tops.length && board.id === S.board.id) {
     s = pptx.addSlide();
     s.background = { color: 'F1EFEA' };
     s.addText(board.title, { x: 0.4, y: 0.2, w: 12.5, h: 0.5, fontSize: 18, bold: true, color: '1F2328', fontFace: 'Calibri' });
-    const els = $$('.card', world).map(el => ({ el, it: itemById(el.dataset.id), r: worldRectOf(el.dataset.id) })).filter(x => x.it && x.r);
+    const byId = new Map(board.items.map(i => [i.id, i]));
+    const els = $$('.card', world).map(el => ({ el, it: byId.get(el.dataset.id), r: worldRectOf(el.dataset.id) })).filter(x => x.it && x.r);
     const topEls = els.filter(x => !x.it.columnId);
     const bx = Math.min(...topEls.map(x => x.r.x)), by = Math.min(...topEls.map(x => x.r.y));
     const bw = Math.max(...topEls.map(x => x.r.x + x.r.w)) - bx, bh = Math.max(...topEls.map(x => x.r.y + x.r.h)) - by;
@@ -325,7 +352,7 @@ async function exportPPTX(board) {
         s.addText(it.title || 'Column', { x: p.x, y: p.y, w: p.w, h: Math.min(p.h, 40 * k), fontSize: base, bold: true, color: '1F2328', margin: Math.max(1, 6 * k * 72), valign: 'middle' });
       } else if (it.type === 'image' || it.type === 'sketch') {
         const img = $('img', el);
-        const d = img ? await imageData(it, 1200) : null;
+        const d = img ? await imageData(it) : null;
         if (d) {
           const ir = img.getBoundingClientRect(), z = S.view.z, tl = screenToWorld(ir.left, ir.top);
           s.addImage({ data: d.dataURL, ...P({ x: tl.x, y: tl.y, w: ir.width / z, h: ir.height / z }) });
@@ -398,7 +425,7 @@ async function exportPPTX(board) {
   }
   chunked('Notes', loose.filter(b => b.length));
   for (const it of images) {
-    const d = await imageData(it, 1800);
+    const d = await imageData(it);
     if (!d) continue;
     const sl = titled(it.caption || (it.type === 'sketch' ? 'Sketch' : 'Image'));
     const maxW = 12.1, maxH = 5.8, sc = Math.min(maxW / d.w, maxH / d.h);
@@ -408,14 +435,17 @@ async function exportPPTX(board) {
   if (subs.length) {
     titled('Boards inside this board').addText(subs.map((b, i) => ({ text: `${b.title} — ${b.items.length} cards`, options: { bullet: true, fontSize: 20, color: '1F2328', breakLine: i < subs.length - 1 } })), textBox);
   }
-  await pptx.writeFile({ fileName: slug(board.title) + '.pptx' });
+  download(await pptx.write({ outputType: 'blob', compression: true }), slug(board.title) + '.pptx');
 }
 
 // ---------- snapshot (PDF & PNG) ----------
 async function snapshotBoard(board) {
   const html2canvas = await loadLib('h2c');
-  const b = contentBounds(topItems(board));
-  if (!b) throw new Error('This board is empty');
+  const ids = new Set(board.items.map(i => i.id));
+  const rects = topItems(board).map(i => worldRectOf(i.id)).filter(Boolean);
+  if (!rects.length) throw new Error('Nothing to export');
+  const x0 = Math.min(...rects.map(r => r.x)), y0 = Math.min(...rects.map(r => r.y));
+  const b = { x: x0, y: y0, w: Math.max(...rects.map(r => r.x + r.w)) - x0, h: Math.max(...rects.map(r => r.y + r.h)) - y0 };
   const pad = 40;
   const W = Math.ceil(b.w + pad * 2), H = Math.ceil(b.h + pad * 2);
   const host = document.createElement('div');
@@ -429,11 +459,29 @@ async function snapshotBoard(board) {
   $$('iframe', clone).forEach(f => f.replaceWith(Object.assign(document.createElement('div'), { style: 'position:absolute;inset:0;background:#111' })));
   $$('.add-task', clone).forEach(e => { e.style.visibility = 'hidden'; });
   $('svg', clone)?.remove();
+  // Drop cards that aren't being exported. A column whose cards were picked individually stays as
+  // an invisible placeholder so those cards keep their positions.
+  $$(':scope > .card', clone).forEach(el => {
+    if (ids.has(el.dataset.id)) return;
+    const kids = $$(':scope > .col-body > .card', el);
+    if (!kids.some(k => ids.has(k.dataset.id))) return el.remove();
+    Object.assign(el.style, { visibility: 'hidden', background: 'transparent', borderColor: 'transparent', boxShadow: 'none' });
+    kids.forEach(k => { k.style.visibility = ids.has(k.dataset.id) ? 'visible' : 'hidden'; });
+  });
+  // html2canvas misplaces box shadows on wide cards, so the copy uses a hairline border instead.
+  $$('.card', clone).forEach(el => {
+    el.style.boxShadow = 'none';
+    if (!el.classList.contains('t-heading')) el.style.border = '1px solid rgba(0,0,0,.09)';
+  });
   host.appendChild(clone);
   document.body.appendChild(host);
   try {
     const scale = Math.min(2, 9000 / Math.max(W, H));
-    const canvas = await html2canvas(host, { backgroundColor: bg, scale, useCORS: true, logging: false, width: W, height: H });
+    const canvas = await html2canvas(host, {
+      backgroundColor: bg, scale, useCORS: true, logging: false, width: W, height: H,
+      // Only the off-screen copy belongs in the picture, not the live board, toolbars or messages.
+      ignoreElements: el => el.classList?.contains('toast-wrap') || ['layer', 'viewport', 'toolbar', 'topbar'].includes(el.id),
+    });
     drawConnections(canvas.getContext('2d'), board, (x, y) => [(x - b.x + pad) * scale, (y - b.y + pad) * scale], scale);
     return canvas;
   } finally {
@@ -502,12 +550,12 @@ async function exportPDF(board, opts) {
     const c = await snapshotBoard(board);
     const maxW = W - M * 2, maxH = H - M * 2 - 40;
     const sc = Math.min(maxW / c.width, maxH / c.height);
-    pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', M + (maxW - c.width * sc) / 2, M + 40, c.width * sc, c.height * sc);
+    pdf.addImage(c.toDataURL('image/jpeg', 0.85), 'JPEG', M + (maxW - c.width * sc) / 2, M + 40, c.width * sc, c.height * sc);
   }
 
   // Text outline pages
   const entries = outline(board, opts.nested);
-  if (!entries.length) return pdf.save(slug(board.title) + '.pdf');
+  if (!entries.length) return download(pdf.output('blob'), slug(board.title) + '.pdf');
   pdf.addPage('a4', 'portrait');
   W = pdf.internal.pageSize.getWidth();
   H = pdf.internal.pageSize.getHeight();
@@ -563,12 +611,12 @@ async function exportPDF(board, opts) {
           break;
         }
         case 'image': {
-          const d = await imageData(bl.it, 1400);
+          const d = await imageData(bl.it, 1000);
           if (!d) break;
           const maxW = W - PM * 2, maxH = 360;
           const sc = Math.min(maxW / d.w, maxH / d.h, 1);
           ensure(d.h * sc + 8);
-          pdf.addImage(d.dataURL, d.fmt, PM + ind, y, d.w * sc, d.h * sc);
+          pdf.addImage(d.dataURL, d.fmt, PM + ind, y, d.w * sc, d.h * sc, 'img-' + (bl.it.blob || bl.it.id), 'FAST');
           y += d.h * sc + 6;
           if (bl.caption) write(bl.caption, { size: 9, italic: true, color: [110, 110, 110] });
           break;
@@ -578,7 +626,7 @@ async function exportPDF(board, opts) {
     }
     y += 8;
   }
-  pdf.save(slug(board.title) + '.pdf');
+  download(pdf.output('blob'), slug(board.title) + '.pdf');
 }
 
 // ---------- Markdown ----------
@@ -623,6 +671,23 @@ async function exportMD(board, opts) {
 }
 
 // ---------- export dialog ----------
+/* A throwaway copy of a board holding only the chosen cards (plus the contents of chosen columns).
+   Cards are cloned, so exporting a selection never changes the saved board. */
+function selectionBoard(board, chosen) {
+  const ids = new Set(chosen);
+  for (const it of board.items) if (it.columnId && ids.has(it.columnId)) ids.add(it.id);
+  const items = board.items.filter(i => ids.has(i.id)).map(i => {
+    const c = structuredClone(i);
+    if (c.columnId && !ids.has(c.columnId)) {
+      const r = worldRectOf(c.id);
+      c.columnId = null;
+      if (r) Object.assign(c, { x: r.x, y: r.y });
+    }
+    return c;
+  });
+  const n = chosen.length;
+  return { ...board, title: `${board.title} (${n} selected card${n === 1 ? '' : 's'})`, items, conns: board.conns.filter(c => ids.has(c.from) && ids.has(c.to)) };
+}
 const EXPORTS = [
   ['docx', 'Word document', 'Editable .docx — text, lists, tasks, links and images. Opens in Word, Pages and Google Docs.', '#2b579a', 'DOC'],
   ['pptx', 'PowerPoint', 'Editable .pptx — a slide with the board laid out as shapes, plus slides per column, notes and images.', '#c43e1c', 'PPT'],
@@ -631,19 +696,22 @@ const EXPORTS = [
   ['md', 'Markdown', 'Plain-text .md with headings, lists and embedded images.', '#555b66', 'MD'],
   ['json', 'Boardly file', 'A .json copy of this board and its sub-boards that can be imported again.', '#8a4fd8', '{ }'],
 ];
-function openExport() {
+function openExport(only) {
   exitEdit();
-  const board = S.board;
+  const chosen = only?.length ? only : null;
+  const board = chosen ? selectionBoard(S.board, chosen) : S.board;
+  const formats = chosen ? EXPORTS.filter(f => f[0] !== 'json') : EXPORTS;
   const wrap = document.createElement('div');
-  wrap.innerHTML = `<div class="export-grid">${EXPORTS.map(([k, t, d, c, b]) => `<button class="export-opt" data-fmt="${k}"><span class="badge" style="background:${c}">${b}</span><div><b>${t}</b><span>${d}</span></div></button>`).join('')}</div>
-    <label class="check"><input type="checkbox" checked data-nested> Include boards inside this board (Word, PDF, Markdown)</label>`;
-  const m = openModal({ title: `Export “${board.title}”`, body: wrap });
+  wrap.innerHTML = `${chosen ? `<p class="muted" style="margin:0 0 12px">Only the ${chosen.length} selected card${chosen.length === 1 ? '' : 's'} will be exported, so the file stays smaller.</p>` : ''}
+    <div class="export-grid">${formats.map(([k, t, d, c, b]) => `<button class="export-opt" data-fmt="${k}"><span class="badge" style="background:${c}">${b}</span><div><b>${t}</b><span>${d}</span></div></button>`).join('')}</div>
+    <label class="check"><input type="checkbox" checked data-nested> Include boards inside ${chosen ? 'the selected board cards' : 'this board'} (Word, PDF, Markdown)</label>`;
+  const m = openModal({ title: chosen ? `Export ${chosen.length} selected card${chosen.length === 1 ? '' : 's'}` : `Export “${board.title}”`, body: wrap });
   wrap.addEventListener('click', async e => {
     const b = e.target.closest('[data-fmt]');
     if (!b) return;
     const opts = { nested: $('[data-nested]', wrap).checked };
     closeModal(m);
-    const t = toast('Preparing export…');
+    startImageExport('Preparing export');
     try {
       const sel = new Set(S.sel);
       clearSelection();
@@ -658,12 +726,12 @@ function openExport() {
       }
       S.sel = sel;
       syncSelection();
-      t.remove();
       toast('Export ready — check your downloads');
     } catch (err) {
       console.error(err);
-      t.remove();
-      toast('Export failed: ' + err.message);
+      toast('Export failed: ' + err.message, 8000);
+    } finally {
+      endImageExport();
     }
   });
 }

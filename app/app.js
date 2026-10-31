@@ -1470,6 +1470,8 @@ viewport.addEventListener('contextmenu', e => {
     single && (it.type === 'link' || it.type === 'video') && { label: 'Open link', icon: 'external', action: () => window.open(it.url, '_blank', 'noopener') },
     single && it.columnId && { label: 'Move out of column', action: () => { beginDetach(it); } },
     '-',
+    { label: sel.length > 1 ? `Export ${sel.length} selected cards…` : 'Export this card…', icon: 'download', action: () => openExport(sel.map(s => s.id)) },
+    '-',
     { label: 'Duplicate', kbd: '⌘D', action: duplicateSelection },
     { label: 'Copy', kbd: '⌘C', action: () => { S.clip = serializeSel(); toast('Copied'); } },
     { label: 'Bring to front', action: () => { checkpoint(); let z = nextZ(); sel.forEach(s => s.z = z++); touch(); renderBoard(); } },
@@ -1556,13 +1558,13 @@ function confirmBox(title, text, okLabel = 'OK', danger = false) {
   });
 }
 let toastWrap = null;
-function toast(msg) {
+function toast(msg, ms = 3200) {
   if (!toastWrap) { toastWrap = document.createElement('div'); toastWrap.className = 'toast-wrap'; document.body.appendChild(toastWrap); }
   const t = document.createElement('div');
   t.className = 'toast';
   t.textContent = msg;
   toastWrap.appendChild(t);
-  setTimeout(() => t.remove(), 3200);
+  if (ms) setTimeout(() => t.remove(), ms);
   return t;
 }
 

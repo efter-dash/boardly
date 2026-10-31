@@ -1,7 +1,7 @@
 {
   "name": "boardly",
   "productName": "Boardly",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A local-first visual board app. Notes, images, to-dos, links and sketches on an endless canvas, exportable to Word, PowerPoint and PDF.",
   "author": "efter-dash",
   "license": "MIT",
